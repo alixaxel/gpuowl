@@ -188,7 +188,7 @@ string toLiteral(F value) {
   [[maybe_unused]] F back = 0;
   sscanf(s.c_str(), (sizeof(F) == 4) ? "%f" : "%lf", &back);
   assert(back == value);
-  
+
   return s;
 }
 
@@ -313,11 +313,15 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (k == "PAD") pad_size = atoi(v.c_str());
   }
 
-  // Maximum WMUL is 32KB / (WIDTH * SHUFL_BYTES_W)
+  // Maximum WMUL is 32KB / (WIDTH * SHUFL_BYTES_W) to stay within shared memory limits.
+  // Also update config so the clamped value reaches the OpenCL compiler, not just the C++ side.
   {
     u32 shufl_bytes_w = args.value("SHUFL_BYTES_W", 8);
     u32 max_wmul = 32768 / (fft.shape.width * shufl_bytes_w);
-    if (wmul > max_wmul) wmul = max_wmul;
+    if (wmul > max_wmul) {
+      wmul = max_wmul;
+      config["WMUL"] = to_string(wmul);
+    }
   }
 
   string defines = toDefine(config);
@@ -613,14 +617,14 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
     if (fft.shape.middle == 16) regs = 56;
     else if (fft.shape.middle == 8) regs = 44;
     else if (fft.shape.middle == 4) regs = 32;
-    else regs = -1;  
+    else regs = -1;
     use_override = "REGMI31";
     break;
   case MIDIN61:            // Register usage depends on MIDDLE
     if (fft.shape.middle == 16) regs = 96;
     else if (fft.shape.middle == 8) regs = 72;
     else if (fft.shape.middle == 4) regs = 64;
-    else regs = -1;  
+    else regs = -1;
     use_override = "REGMI61";
     break;
   case TAIL:               // Register usage depends on NH and the FP32/FP64 (assumes double-wide kernel)
@@ -812,7 +816,7 @@ Gpu::Gpu(Queue* q, GpuCommon shared, FFTConfig fft, u64 E, const vector<KeyVal>&
 
   statsBits{u32(args.value("STATS", 0))},
   timeBufVect{profile.make("proofBufVect")}
-{    
+{
 
   float bitsPerWord = E / float(N);
   if (logFftSize) {
@@ -1216,7 +1220,7 @@ void Gpu::logTimeKernels() {
   u64 total = 0;
   for (const TimeInfo* p : prof) { total += p->times[2]; }
   if (!total) { return; } // no profile
-  
+
   char buf[256];
   // snprintf(buf, sizeof(buf), "Profile:\n ");
 
@@ -1283,7 +1287,7 @@ void Gpu::writeIn(Buffer<Word>& buf, vector<Word>&& words) {
 Words Gpu::expExp2(const Words& A, u32 n) {
   u32 logStep   = 10000;
   u32 blockSize = 100;
-  
+
   writeIn(bufData, std::move(A));
   IterationTimer timer{0};
   u32 k = 0;
@@ -1515,7 +1519,7 @@ static string formatETA(u32 secs) {
   } else {
     snprintf(buf, sizeof(buf), "%02d:%02d", hours, mins);
   }
-  return string(buf);  
+  return string(buf);
 }
 
 static string getETA(u32 step, u32 total, float secsPerStep) {
@@ -1534,7 +1538,7 @@ string RoeInfo::toString() const {
 
 static string makeLogStr(const string& status, u64 k, u64 res, float secsPerIt, u64 nIters) {
   char buf[256];
-  
+
   snprintf(buf, sizeof(buf), "%2s %9" PRIu64 " %016" PRIx64 " %4.0f ETA %s; ",
            status.c_str(), k, res, /* k / float(nIters) * 100, */
            secsPerIt * 1'000'000, getETA(k, nIters, secsPerIt).c_str());
@@ -1615,7 +1619,7 @@ void Gpu::selftestTrig() {
     if (s < refSin) { ++sdown; }
     if (c > refCos) { ++cup; }
     if (c < refCos) { ++cdown; }
-    
+
     double norm = trigNorm(c, s);
 
     if (norm < 1.0) { ++oneDown; }
@@ -1689,7 +1693,7 @@ fs::path Gpu::saveProof(const Args& args, const ProofSet& proofSet) {
     auto [proof, hashes] = proofSet.computeProof(this);
     fs::path tmpFile = proof.file(args.proofToVerifyDir);
     proof.save(tmpFile);
-            
+
     fs::path proofFile = proof.file(args.proofResultDir);
 
     bool ok = Proof::load(tmpFile).verify(this, hashes);
@@ -1985,7 +1989,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
   assert(checkStep % logStep == 0);
 
   u32 power = getProofPower(k);
-  
+
   ProofSet proofSet{E, power};
 
   bool isPrime = false;
@@ -2105,11 +2109,11 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         }
 
         doBigLog(k, res, ok, secsPerIt, kEndEnd, nErrors);
-          
+
         if (k >= kEndEnd) {
           fs::path proofFile = saveProof(args, proofSet);
           return {isPrime, finalRes64, nErrors, proofFile.string(), toHex(res2048)};
-        }        
+        }
       } else {
         ++nErrors;
         doBigLog(k, res, ok, secsPerIt, kEndEnd, nErrors);
@@ -2124,9 +2128,9 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         lastFailedRes64 = res;
         if (!doStop) { goto reload; }
       }
-        
+
       logTimeKernels();
-        
+
       if (doStop) {
         queue->finish();
         throw "stop requested";

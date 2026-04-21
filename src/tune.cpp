@@ -1180,7 +1180,7 @@ void Tune::tune() {
   // The width = height = 512 FFT shape is so good, we probably don't need to time the width = 1024, height = 256 shape.
   bool skip_1K_256 = 1;
 
-// make command line args for this? 
+// make command line args for this?
 skip_some_WH_variants = 2;   // should default be 1??
 skip_1K_256 = 0;
 

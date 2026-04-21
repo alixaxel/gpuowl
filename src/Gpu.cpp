@@ -355,6 +355,11 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       if (threads * (u32)regs > (u32)maxRegsPerBlock) {
         u32 max_wmul_regs = (u32)maxRegsPerBlock / (g_w * (u32)regs);
         if (max_wmul_regs < 1) max_wmul_regs = 1;
+        // The kernel work-size is WIDTH*(BIG_H+wmul)/nW and group-size is G_W*wmul, so
+        // BIG_H must be divisible by wmul for an exact dispatch.  BIG_H is always a power
+        // of 2; decrease max_wmul_regs until it divides BIG_H (at most a few iterations).
+        u32 bigH = fft.shape.height * fft.shape.middle;
+        while (max_wmul_regs > 1 && bigH % max_wmul_regs != 0) max_wmul_regs--;
         log("WMUL clamped from %u to %u: %u threads/block x %d regs/thread = %u exceeds register limit %d\n",
             wmul, max_wmul_regs, threads, regs, threads * (u32)regs, maxRegsPerBlock);
         wmul = max_wmul_regs;

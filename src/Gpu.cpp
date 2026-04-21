@@ -324,6 +324,46 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
+#ifdef CUDA_BACKEND
+  // On CUDA, carryFused launches G_W * WMUL threads per block where G_W = WIDTH / NW.
+  // If threads_per_block * regs_per_thread exceeds the device's register file per SM
+  // (CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK, typically 65536), cuLaunchKernel
+  // returns CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES.  Clamp WMUL here before compilation.
+  // Skip when NOREG is set since the compiler-chosen register count is unknown.
+  if (isNvidiaGpu(id) && !args.value("NOREG", 0)) {
+    u32 nW = fft.shape.nW();
+    u32 g_w = fft.shape.width / nW;
+
+    // Mirror numCudaRegisters(CARRYFUSED): get the --maxrregcount for this FFT type.
+    int regs = -1;
+    const char* regOverrideKey = "";
+    switch (fft.shape.fft_type) {
+    case FFT64:     regs = nW == 8 ? 72 : 64;  regOverrideKey = "REGCF64";     break;
+    case FFT3161:   regs = nW == 8 ? 96 : 56;  regOverrideKey = "REGCF3161";   break;
+    case FFT3261:   regs = nW == 8 ? 96 : 56;  regOverrideKey = "REGCF3261";   break;
+    case FFT61:     regs = nW == 8 ? 80 : 64;  regOverrideKey = "REGCF61";     break;
+    case FFT323161: regs = nW == 8 ? 128 : 72; regOverrideKey = "REGCF323161"; break;
+    default: break;  // regs stays -1; skip check for types without a register cap
+    }
+    int override_regs = args.value(regOverrideKey, 0);
+    if (override_regs > 0) regs = override_regs;
+
+    if (regs > 0) {
+      int maxRegsPerBlock = 65536;
+      cuDeviceGetAttribute(&maxRegsPerBlock, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK, id->dev);
+      u32 threads = g_w * wmul;
+      if (threads * (u32)regs > (u32)maxRegsPerBlock) {
+        u32 max_wmul_regs = (u32)maxRegsPerBlock / (g_w * (u32)regs);
+        if (max_wmul_regs < 1) max_wmul_regs = 1;
+        log("WMUL clamped from %u to %u: %u threads/block x %d regs/thread = %u exceeds register limit %d\n",
+            wmul, max_wmul_regs, threads, regs, threads * (u32)regs, maxRegsPerBlock);
+        wmul = max_wmul_regs;
+        config["WMUL"] = to_string(wmul);
+      }
+    }
+  }
+#endif
+
   string defines = toDefine(config);
   if (doLog) { log("config: %s\n", defines.c_str()); }
 

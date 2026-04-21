@@ -20,7 +20,7 @@
 #ifdef __linux__
 #include <unistd.h>
 #endif
-#include "log.h"
+#include "../log.h"
 
 using namespace std;
 
